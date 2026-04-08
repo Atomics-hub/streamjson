@@ -13,8 +13,10 @@
     "demo": "npx serve ."
   },
   "devDependencies": {
-    "partial-json": "^0.1.7",
     "best-effort-json-parser": "^1.4.0",
-    "jsonrepair": "^3.13.3"
+    "jsonrepair": "^3.13.3",
+    "partial-json": "^0.1.7",
+    "react": "^19.2.4",
+    "react-test-renderer": "^19.2.4"
   }
 }

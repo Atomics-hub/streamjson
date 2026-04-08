@@ -39,7 +39,7 @@
   "homepage": "https://github.com/Atomics-hub/streamjson#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Atomics-hub/streamjson"
+    "url": "git+https://github.com/Atomics-hub/streamjson.git"
   },
   "bugs": {
     "url": "https://github.com/Atomics-hub/streamjson/issues"
