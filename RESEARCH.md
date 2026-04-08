@@ -35,9 +35,9 @@ Focused on repairing malformed JSON, not streaming. Even heavier than partial-js
 
 Similar to partial-json but with less recovery logic. Still re-parses the full string each time. O(N²).
 
-### Anthropic SDK (vendored parser)
+### Anthropic SDK
 
-Anthropic's SDK vendors a partial JSON parser internally for tool_use streaming. It uses a tokenizer-based approach — better than regex, still re-parses the accumulated string on each delta event. O(N²).
+Anthropic's SDK accumulates `input_json_delta` events and only delivers the complete JSON after the `content_block_stop` event. This means you cannot display partial structured output mid-stream at all — you have to wait for the entire tool call to finish before showing anything to the user.
 
 ### Vercel AI SDK
 
@@ -102,8 +102,8 @@ The O(N) vs O(N²) difference is dramatic at real-world payload sizes:
 | Payload | StreamJSON (per chunk) | partial-json (per chunk) | Ratio |
 |---------|----------------------|-------------------------|-------|
 | 1KB     | 0.27 μs              | 27 μs                   | 100x  |
-| 10KB    | 0.21 μs              | 150 μs                  | 714x  |
-| 50KB    | 0.19 μs              | 686 μs                  | 3,400x|
+| 10KB    | 0.21 μs              | 150 μs                  | 700x  |
+| 50KB    | 0.22 μs              | 690 μs                  | 3,000x+|
 
 StreamJSON's per-chunk cost stays flat regardless of payload size. Competitors grow linearly (because each chunk re-parses everything before it).
 

@@ -9,7 +9,7 @@
     "build": "npm run build --workspaces",
     "test": "node --test test/**/*.test.js",
     "bench": "node test/bench/streaming-benchmark.js",
-    "demo": "npx serve demo"
+    "demo": "npx serve ."
   },
   "devDependencies": {
     "partial-json": "^0.1.7",

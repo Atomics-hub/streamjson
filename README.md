@@ -14,17 +14,17 @@ Every other "streaming JSON" library re-parses the entire accumulated string on 
 STREAMING (simulated LLM token delivery, 612 bytes)
 
 Library             Median (ms)    Speedup
-StreamJSON                0.024       1.0x ⚡
-partial-json              1.317      55.8x
-jsonrepair                2.184      92.4x
-best-effort               0.785      33.2x
+StreamJSON                0.03        1.0x ⚡
+partial-json              1.56       55x
+jsonrepair                2.21       78x
+best-effort               0.99       35x
 
 SCALE TEST (per-chunk cost as payload grows)
 
 Size         StreamJSON (µs/chunk)    partial-json (µs/chunk)    Ratio
-1KB                         0.207                    29.030      140x
-10KB                        0.193                   135.330      700x
-50KB                        0.195                   700.320    3,586x
+1KB                         0.27                    27         100x
+10KB                        0.21                   150         700x
+50KB                        0.22                   690       3,000x+
 ```
 
 StreamJSON's per-chunk cost stays flat. Competitors grow linearly.
