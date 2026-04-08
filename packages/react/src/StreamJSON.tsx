@@ -15,8 +15,11 @@ export function StreamJSON<T = unknown>({
 }: StreamJSONProps<T>) {
   const parserRef = useRef<StreamJSONParser | null>(null)
   const prevContentRef = useRef('')
+  const contentRef = useRef(content)
   const [gen, setGen] = useState(0)
   const [isComplete, setIsComplete] = useState(false)
+
+  contentRef.current = content
 
   if (!parserRef.current) {
     parserRef.current = new StreamJSONParser(options)
@@ -52,8 +55,9 @@ export function StreamJSON<T = unknown>({
       setGen(g => g + 1)
     } else if (!complete && isComplete) {
       parserRef.current?.reset()
-      if (content.length > 0) parserRef.current?.push(content)
-      prevContentRef.current = content
+      const cur = contentRef.current
+      if (cur.length > 0) parserRef.current?.push(cur)
+      prevContentRef.current = cur
       setIsComplete(false)
       setGen(g => g + 1)
     }

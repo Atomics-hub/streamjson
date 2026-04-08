@@ -448,6 +448,90 @@ describe('edge cases', () => {
     })
   })
 
+  describe('NaN in arrays preserves index', () => {
+    it('NaN in array assigns null and preserves position', () => {
+      const p = new StreamJSON()
+      p.push('[1e999, 2, 3]')
+      p.end()
+      assert.deepEqual(p.get(), [null, 2, 3])
+    })
+
+    it('bare minus in array assigns null', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('[-, 2]')
+      p.end()
+      assert.deepEqual(p.get(), [null, 2])
+      assert.ok(errors.length > 0)
+    })
+
+    it('1e in array assigns null', () => {
+      const p = new StreamJSON()
+      p.push('[1e, 2]')
+      p.end()
+      assert.deepEqual(p.get(), [null, 2])
+    })
+  })
+
+  describe('listeners survive reset', () => {
+    it('value events fire on second parse after reset', () => {
+      const values = []
+      const p = new StreamJSON()
+      p.on('value', (path, val) => values.push(val))
+      p.push('{"a": 1}')
+      p.end()
+      p.reset()
+      p.push('{"b": 2}')
+      p.end()
+      assert.deepEqual(values, [1, 2])
+    })
+  })
+
+  describe('container event paths', () => {
+    it('nested array events have correct paths', () => {
+      const events = []
+      const p = new StreamJSON()
+      p.on('array_start', (path) => events.push({ type: 'start', path: [...path] }))
+      p.on('array_end', (path) => events.push({ type: 'end', path: [...path] }))
+      p.push('{"items": [[1], [2]]}')
+      p.end()
+      // outer array at path ["items"]
+      assert.deepEqual(events[0], { type: 'start', path: ['items'] })
+      // inner arrays at ["items", 0] and ["items", 1]
+      assert.deepEqual(events[1], { type: 'start', path: ['items', 0] })
+      assert.deepEqual(events[2], { type: 'end', path: ['items', 0] })
+      assert.deepEqual(events[3], { type: 'start', path: ['items', 1] })
+    })
+  })
+
+  describe('single char chunks all types', () => {
+    it('handles all JSON types with single char chunks', () => {
+      const json = '{"s":"a\\nb","n":42,"b":true,"x":null,"a":[1,{}]}'
+      const p = new StreamJSON()
+      for (const ch of json) p.push(ch)
+      p.end()
+      assert.equal(JSON.stringify(p.get()), JSON.stringify(JSON.parse(json)))
+    })
+  })
+
+  describe('OpenAI tool_calls streaming pattern', () => {
+    it('streams nested function call JSON', () => {
+      const json = '{"name":"get_weather","arguments":{"location":"SF","units":"celsius"}}'
+      const p = new StreamJSON()
+      // simulate small chunks like SSE deltas
+      const chunkSize = 5
+      for (let i = 0; i < json.length; i += chunkSize) {
+        p.push(json.slice(i, i + chunkSize))
+      }
+      p.end()
+      const result = p.get()
+      assert.equal(result.name, 'get_weather')
+      assert.equal(result.arguments.location, 'SF')
+      assert.equal(result.arguments.units, 'celsius')
+    })
+  })
+
   describe('zero with exponent', () => {
     it('0e5 is valid — no error', () => {
       const errors = []

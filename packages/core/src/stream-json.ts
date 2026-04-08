@@ -395,10 +395,12 @@ export class StreamJSON {
     const val = Number(buf)
     if (Number.isNaN(val) || !Number.isFinite(val)) {
       this.emitError(`Invalid number: ${buf}`)
-      // in object context, assign null so the key isn't silently dropped
-      const top = this.stack.length > 0 ? this.stack[this.stack.length - 1] : null
-      if (top && top.type === 0 && top.key !== null) {
-        this.assignValue(null)
+      // assign null to preserve position — prevents key drops (objects) and index shifts (arrays)
+      if (this.stack.length > 0) {
+        const top = this.stack[this.stack.length - 1]
+        if ((top.type === 0 && top.key !== null) || top.type === 1) {
+          this.assignValue(null)
+        }
       }
       this.afterValue()
       return
@@ -484,6 +486,7 @@ export class StreamJSON {
       } else {
         this.assignValue(this.strBuf)
         this.emit('value', this.currentPath(), this.strBuf, true)
+        this.afterValue()
       }
       this.strBuf = ''
     } else if (this.state === State.IN_NUMBER) {
