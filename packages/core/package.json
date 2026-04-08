@@ -1,0 +1,53 @@
+{
+  "name": "@a5omic/streamjson",
+  "version": "0.1.0",
+  "description": "O(1) streaming JSON parser for the AI era. Zero dependencies. ~3KB gzipped.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": [
+    "json",
+    "streaming",
+    "parser",
+    "llm",
+    "ai",
+    "incremental",
+    "partial",
+    "openai",
+    "claude",
+    "gemini",
+    "structured-output",
+    "function-calling",
+    "tool-use"
+  ],
+  "license": "MIT",
+  "author": "Tom",
+  "homepage": "https://github.com/Atomics-hub/streamjson#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Atomics-hub/streamjson"
+  },
+  "bugs": {
+    "url": "https://github.com/Atomics-hub/streamjson/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
