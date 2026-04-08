@@ -1,6 +1,6 @@
 {
   "name": "@a5omic/streamjson",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "O(1) streaming JSON parser for the AI era. Zero dependencies. ~4KB gzipped.",
   "type": "module",
   "main": "dist/index.js",

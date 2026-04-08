@@ -308,6 +308,16 @@ describe('edge cases', () => {
       p.end()
       assert.ok(errors.length > 0)
     })
+
+    it('truncated unicode escape reprocesses the closing quote', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('{"a":"\\u00"}')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid hex digit')))
+      assert.deepEqual(p.get(), obj({ a: '' }))
+    })
   })
 
   describe('number validation', () => {
@@ -372,6 +382,7 @@ describe('edge cases', () => {
       p.push('[01]')
       p.end()
       assert.ok(errors.some(e => e.includes('Leading zero')))
+      assert.deepEqual(p.get(), [null])
     })
 
     it('trailing dot emits error', () => {
@@ -398,6 +409,37 @@ describe('edge cases', () => {
       p.push('00')
       p.end()
       assert.ok(errors.some(e => e.includes('Leading zero')))
+      assert.equal(p.get(), null)
+    })
+
+    it('leading zero in object preserves the key with null', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('{"x":01}')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Leading zero')))
+      assert.deepEqual(p.get(), obj({ x: null }))
+    })
+
+    it('invalid exponent after decimal assigns null', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('1.e2')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid number')))
+      assert.equal(p.get(), null)
+    })
+
+    it('missing integer before decimal assigns null', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('-.1')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid number')))
+      assert.equal(p.get(), null)
     })
   })
 
@@ -418,6 +460,26 @@ describe('edge cases', () => {
       p.push(']')
       p.end()
       assert.ok(errors.some(e => e.includes('Unexpected ]')))
+    })
+
+    it('mismatched ] after an object value emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('{"a":1]')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Unexpected ]')))
+      assert.deepEqual(p.get(), obj({ a: 1 }))
+    })
+
+    it('mismatched } after an array value emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('[1,2}')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Unexpected }')))
+      assert.deepEqual(p.get(), [1, 2])
     })
   })
 

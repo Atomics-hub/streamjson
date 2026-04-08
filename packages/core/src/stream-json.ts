@@ -49,7 +49,7 @@ export class StreamJSON {
           this.parseEscape(c, chunk[i])
           break
         case State.IN_STRING_UNICODE:
-          this.parseUnicode(chunk[i])
+          this.parseUnicode(c, chunk[i])
           break
         case State.IN_NUMBER:
           this.parseNumber(c, chunk[i])
@@ -162,10 +162,13 @@ export class StreamJSON {
     }
   }
 
-  private parseUnicode(ch: string): void {
+  private parseUnicode(c: number, ch: string): void {
     if (!HEX.test(ch)) {
       this.emitError(`Invalid hex digit in unicode escape: ${ch}`)
+      this.uniAccum = ''
+      this.uniCount = 0
       this.state = State.IN_STRING
+      this.parseString(c, ch)
       return
     }
     this.uniAccum += ch
@@ -193,13 +196,6 @@ export class StreamJSON {
 
   private parseNumber(c: number, ch: string): void {
     if (c >= 0x30 && c <= 0x39) {
-      if ((this.numBuf === '0' || this.numBuf === '-0') && c >= 0x30 && c <= 0x39) {
-        // leading zero followed by another digit — emit error, end the 0, reprocess
-        this.emitError(`Leading zero in number: ${this.numBuf}${ch}`)
-        this.endNumber()
-        this.reprocessAfterNumber(c, ch)
-        return
-      }
       this.numBuf += ch
     } else if (c === 0x2E || c === 0x65 || c === 0x45) {
       this.numBuf += ch
@@ -317,11 +313,15 @@ export class StreamJSON {
       if (this.stack.length > 0 && this.stack[this.stack.length - 1].type === 0) {
         this.endContainer()
         this.afterValue()
+      } else {
+        this.emitError('Unexpected }')
       }
     } else if (c === 0x5D) { // ]
       if (this.stack.length > 0 && this.stack[this.stack.length - 1].type === 1) {
         this.endContainer()
         this.afterValue()
+      } else {
+        this.emitError('Unexpected ]')
       }
     } else if (c === 0x20 || c === 0x09 || c === 0x0A || c === 0x0D) {
       // whitespace
@@ -349,6 +349,8 @@ export class StreamJSON {
           this.parseExpectValue(c, ch)
         }
       }
+    } else {
+      this.emitError(`Unexpected character: ${ch}`)
     }
   }
 
@@ -392,26 +394,29 @@ export class StreamJSON {
   private endNumber(): void {
     const buf = this.numBuf
     this.numBuf = ''
-    const val = Number(buf)
-    if (Number.isNaN(val) || !Number.isFinite(val)) {
-      this.emitError(`Invalid number: ${buf}`)
-      // assign null to preserve position — prevents key drops (objects), index shifts (arrays), and undefined root
-      if (this.stack.length > 0) {
-        const top = this.stack[this.stack.length - 1]
-        if ((top.type === 0 && top.key !== null) || top.type === 1) {
-          this.assignValue(null)
-        }
-      } else {
-        this.assignValue(null)
-      }
+    const analysis = this.analyzeNumber(buf)
+    if (analysis.kind === 'leading_zero') {
+      this.emitError(`Leading zero in number: ${buf}`)
+      this.assignInvalidNumber()
       this.afterValue()
       return
     }
-    if (buf.length > 1 && buf[0] === '0' && buf[1] >= '0' && buf[1] <= '9') {
-      this.emitError(`Leading zero in number: ${buf}`)
+    if (analysis.kind === 'invalid') {
+      this.emitError(`Invalid number: ${buf}`)
+      this.assignInvalidNumber()
+      this.afterValue()
+      return
     }
-    if (buf.endsWith('.')) {
+    const valueText = analysis.kind === 'trailing_dot' ? buf.slice(0, -1) : buf
+    if (analysis.kind === 'trailing_dot') {
       this.emitError(`Trailing dot in number: ${buf}`)
+    }
+    const val = Number(valueText)
+    if (Number.isNaN(val) || !Number.isFinite(val)) {
+      this.emitError(`Invalid number: ${buf}`)
+      this.assignInvalidNumber()
+      this.afterValue()
+      return
     }
     this.assignValue(val)
     this.emit('value', this.currentPath(), val, true)
@@ -474,6 +479,55 @@ export class StreamJSON {
     if (this.highSurrogate) {
       this.strBuf += String.fromCharCode(this.highSurrogate)
       this.highSurrogate = 0
+    }
+  }
+
+  private analyzeNumber(buf: string): { kind: 'valid' | 'trailing_dot' | 'leading_zero' | 'invalid' } {
+    let i = 0
+    const len = buf.length
+
+    if (len === 0) return { kind: 'invalid' }
+
+    if (buf[i] === '-') i++
+    if (i === len) return { kind: 'invalid' }
+
+    if (buf[i] === '0') {
+      i++
+      if (i < len && buf[i] >= '0' && buf[i] <= '9') return { kind: 'leading_zero' }
+    } else if (buf[i] >= '1' && buf[i] <= '9') {
+      i++
+      while (i < len && buf[i] >= '0' && buf[i] <= '9') i++
+    } else {
+      return { kind: 'invalid' }
+    }
+
+    if (i < len && buf[i] === '.') {
+      i++
+      if (i === len) return { kind: 'trailing_dot' }
+      if (buf[i] < '0' || buf[i] > '9') return { kind: 'invalid' }
+      while (i < len && buf[i] >= '0' && buf[i] <= '9') i++
+    }
+
+    if (i < len && (buf[i] === 'e' || buf[i] === 'E')) {
+      i++
+      if (i < len && (buf[i] === '+' || buf[i] === '-')) i++
+      if (i === len) return { kind: 'invalid' }
+      if (buf[i] < '0' || buf[i] > '9') return { kind: 'invalid' }
+      while (i < len && buf[i] >= '0' && buf[i] <= '9') i++
+    }
+
+    return i === len ? { kind: 'valid' } : { kind: 'invalid' }
+  }
+
+  private assignInvalidNumber(): void {
+    // Preserve object keys and array indexes when a malformed number cannot be recovered.
+    if (this.stack.length > 0) {
+      const top = this.stack[this.stack.length - 1]
+      if ((top.type === 0 && top.key !== null) || top.type === 1) {
+        this.assignValue(null)
+      }
+    } else {
+      this.assignValue(null)
     }
   }
 

@@ -13,16 +13,20 @@ export function StreamJSON<T = unknown>({
   children,
   ...options
 }: StreamJSONProps<T>) {
+  const emitPartial = options.emitPartial ?? false
   const parserRef = useRef<StreamJSONParser | null>(null)
   const prevContentRef = useRef('')
   const contentRef = useRef(content)
+  const completeRef = useRef(complete)
+  const emitPartialRef = useRef(emitPartial)
   const [gen, setGen] = useState(0)
   const [isComplete, setIsComplete] = useState(false)
 
   contentRef.current = content
+  completeRef.current = complete
 
   if (!parserRef.current) {
-    parserRef.current = new StreamJSONParser(options)
+    parserRef.current = new StreamJSONParser({ emitPartial })
   }
 
   useEffect(() => {
@@ -30,6 +34,23 @@ export function StreamJSON<T = unknown>({
       parserRef.current?.reset()
     }
   }, [])
+
+  useEffect(() => {
+    if (emitPartialRef.current === emitPartial) return
+
+    parserRef.current?.reset()
+
+    const parser = new StreamJSONParser({ emitPartial })
+    const cur = contentRef.current
+    if (cur.length > 0) parser.push(cur)
+    if (completeRef.current) parser.end()
+
+    parserRef.current = parser
+    prevContentRef.current = cur
+    emitPartialRef.current = emitPartial
+    setIsComplete(completeRef.current)
+    setGen(g => g + 1)
+  }, [emitPartial])
 
   useEffect(() => {
     const parser = parserRef.current
