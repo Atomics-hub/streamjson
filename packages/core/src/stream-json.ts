@@ -5,6 +5,8 @@ const ESCAPE_MAP: Record<string, string> = {
   '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t',
 }
 
+const HEX = /^[0-9a-fA-F]$/
+
 export class StreamJSON {
   private state: State = State.EXPECT_VALUE
   private stack: ContainerFrame[] = []
@@ -37,6 +39,7 @@ export class StreamJSON {
     if (this.done || this.rootComplete) return
     const len = chunk.length
     for (let i = 0; i < len; i++) {
+      if (this.rootComplete) return
       const c = chunk.charCodeAt(i)
       switch (this.state) {
         case State.IN_STRING:
@@ -50,6 +53,7 @@ export class StreamJSON {
           break
         case State.IN_NUMBER:
           this.parseNumber(c, chunk[i])
+          if (this.rootComplete) return
           break
         case State.IN_KEYWORD:
           this.parseKeyword(c, chunk[i])
@@ -127,10 +131,14 @@ export class StreamJSON {
 
   private parseString(c: number, _ch: string): void {
     if (c === 0x22) { // "
+      this.flushHighSurrogate()
       this.endString()
     } else if (c === 0x5C) { // backslash
+      this.flushHighSurrogate()
       this.state = State.IN_STRING_ESCAPE
     } else {
+      // flush pending lone high surrogate before appending a literal char
+      this.flushHighSurrogate()
       this.strBuf += _ch
       if (!this.isKey && this.emitPartial) this.updatePartial()
     }
@@ -143,13 +151,23 @@ export class StreamJSON {
       this.state = State.IN_STRING_UNICODE
     } else {
       const mapped = ESCAPE_MAP[ch]
-      this.strBuf += mapped !== undefined ? mapped : ch
+      if (mapped !== undefined) {
+        this.strBuf += mapped
+      } else {
+        this.emitError(`Invalid escape sequence: \\${ch}`)
+        this.strBuf += ch
+      }
       this.state = State.IN_STRING
       if (!this.isKey && this.emitPartial) this.updatePartial()
     }
   }
 
   private parseUnicode(ch: string): void {
+    if (!HEX.test(ch)) {
+      this.emitError(`Invalid hex digit in unicode escape: ${ch}`)
+      this.state = State.IN_STRING
+      return
+    }
     this.uniAccum += ch
     this.uniCount++
     if (this.uniCount === 4) {
@@ -174,19 +192,38 @@ export class StreamJSON {
   }
 
   private parseNumber(c: number, ch: string): void {
-    if ((c >= 0x30 && c <= 0x39) || c === 0x2E || c === 0x65 || c === 0x45 || c === 0x2B || c === 0x2D) {
+    if (c >= 0x30 && c <= 0x39) {
+      if ((this.numBuf === '0' || this.numBuf === '-0') && c >= 0x30 && c <= 0x39) {
+        // leading zero followed by another digit — emit error, end the 0, reprocess
+        this.emitError(`Leading zero in number: ${this.numBuf}${ch}`)
+        this.endNumber()
+        this.reprocessAfterNumber(c, ch)
+        return
+      }
       this.numBuf += ch
+    } else if (c === 0x2E || c === 0x65 || c === 0x45) {
+      this.numBuf += ch
+    } else if (c === 0x2B || c === 0x2D) {
+      // + and - only valid after e/E or at start (- only at start)
+      const last = this.numBuf[this.numBuf.length - 1]
+      if (last === 'e' || last === 'E') {
+        this.numBuf += ch
+      } else {
+        this.endNumber()
+        this.reprocessAfterNumber(c, ch)
+      }
     } else {
       this.endNumber()
-      // reprocess this character
-      switch (this.state) {
-        case State.EXPECT_COMMA_OR_END:
-          this.parseCommaOrEnd(c, ch)
-          break
-        case State.EXPECT_VALUE:
-          this.parseExpectValue(c, ch)
-          break
-      }
+      this.reprocessAfterNumber(c, ch)
+    }
+  }
+
+  private reprocessAfterNumber(c: number, ch: string): void {
+    if (this.rootComplete) return
+    switch (this.state) {
+      case State.EXPECT_COMMA_OR_END:
+        this.parseCommaOrEnd(c, ch)
+        break
     }
   }
 
@@ -200,10 +237,8 @@ export class StreamJSON {
         this.afterValue()
       }
     } else {
-      // malformed keyword — try to recover
       this.emitError(`Unexpected character in keyword: ${ch}`)
       this.recoverKeyword()
-      // reprocess
       if (this.state === State.EXPECT_COMMA_OR_END) {
         this.parseCommaOrEnd(c, ch)
       }
@@ -240,6 +275,15 @@ export class StreamJSON {
       if (this.stack.length > 0 && this.stack[this.stack.length - 1].type === 1) {
         this.endContainer()
         this.afterValue()
+      } else {
+        this.emitError('Unexpected ]')
+      }
+    } else if (c === 0x7D) { // } — empty value recovery (e.g. {"a": })
+      if (this.stack.length > 0 && this.stack[this.stack.length - 1].type === 0) {
+        this.endContainer()
+        this.afterValue()
+      } else {
+        this.emitError('Unexpected }')
       }
     } else if (c === 0x20 || c === 0x09 || c === 0x0A || c === 0x0D) {
       // whitespace — skip
@@ -259,7 +303,6 @@ export class StreamJSON {
     } else if (c === 0x20 || c === 0x09 || c === 0x0A || c === 0x0D) {
       // whitespace
     } else {
-      // unquoted key recovery
       this.emitError(`Expected key or }`)
     }
   }
@@ -289,17 +332,22 @@ export class StreamJSON {
         this.strBuf = ''
         this.isKey = true
         this.state = State.IN_STRING
-      } else {
+      } else if (top) {
         this.strBuf = ''
         this.isKey = false
         this.state = State.IN_STRING
       }
     } else if (c === 0x7B || c === 0x5B || (c >= 0x30 && c <= 0x39) || c === 0x2D ||
                c === 0x74 || c === 0x66 || c === 0x6E) {
-      // missing comma recovery for non-string values
+      // missing comma recovery for non-string values — arrays AND objects
       const top = this.stack[this.stack.length - 1]
-      if (top && top.type === 1) {
-        this.parseExpectValue(c, ch)
+      if (top) {
+        if (top.type === 0) {
+          // in object without a key — this is malformed, skip
+          this.emitError(`Missing key for value in object`)
+        } else {
+          this.parseExpectValue(c, ch)
+        }
       }
     }
   }
@@ -342,10 +390,27 @@ export class StreamJSON {
   }
 
   private endNumber(): void {
-    const val = Number(this.numBuf)
+    const buf = this.numBuf
+    this.numBuf = ''
+    const val = Number(buf)
+    if (Number.isNaN(val) || !Number.isFinite(val)) {
+      this.emitError(`Invalid number: ${buf}`)
+      // in object context, assign null so the key isn't silently dropped
+      const top = this.stack.length > 0 ? this.stack[this.stack.length - 1] : null
+      if (top && top.type === 0 && top.key !== null) {
+        this.assignValue(null)
+      }
+      this.afterValue()
+      return
+    }
+    if (buf.length > 1 && buf[0] === '0' && buf[1] >= '0' && buf[1] <= '9') {
+      this.emitError(`Leading zero in number: ${buf}`)
+    }
+    if (buf.endsWith('.')) {
+      this.emitError(`Trailing dot in number: ${buf}`)
+    }
     this.assignValue(val)
     this.emit('value', this.currentPath(), val, true)
-    this.numBuf = ''
     this.afterValue()
   }
 
@@ -391,39 +456,49 @@ export class StreamJSON {
     } else {
       (top.value as unknown[])[top.index] = this.strBuf
     }
-    this.emit('value', this.currentPath(), this.strBuf, false)
+    this.emit('value', this.partialPath(), this.strBuf, false)
   }
 
   private afterValue(): void {
     if (this.stack.length === 0) {
       this.rootComplete = true
-      this.state = State.EXPECT_COMMA_OR_END
-    } else {
-      this.state = State.EXPECT_COMMA_OR_END
+    }
+    this.state = State.EXPECT_COMMA_OR_END
+  }
+
+  private flushHighSurrogate(): void {
+    if (this.highSurrogate) {
+      this.strBuf += String.fromCharCode(this.highSurrogate)
+      this.highSurrogate = 0
     }
   }
 
   private flush(): void {
     if (this.state === State.IN_STRING || this.state === State.IN_STRING_ESCAPE || this.state === State.IN_STRING_UNICODE) {
-      // handle pending high surrogate
-      if (this.highSurrogate) {
-        this.strBuf += String.fromCharCode(this.highSurrogate)
-        this.highSurrogate = 0
-      }
+      this.flushHighSurrogate()
       if (this.isKey) {
         const top = this.stack[this.stack.length - 1]
         if (top) top.key = this.strBuf
+        // key with no value — fall through to assign null below
+        this.state = State.EXPECT_COLON
       } else {
         this.assignValue(this.strBuf)
         this.emit('value', this.currentPath(), this.strBuf, true)
       }
       this.strBuf = ''
     } else if (this.state === State.IN_NUMBER) {
-      this.endNumber()
+      if (this.numBuf.length > 0) this.endNumber()
     } else if (this.state === State.IN_KEYWORD) {
       this.recoverKeyword()
     }
-    // close all open containers
+    // handle truncated key with no value
+    if (this.state === State.EXPECT_COLON || this.state === State.EXPECT_VALUE) {
+      const top = this.stack[this.stack.length - 1]
+      if (top && top.type === 0 && top.key !== null) {
+        this.assignValue(null)
+        this.emit('value', this.currentPath(), null, true)
+      }
+    }
     while (this.stack.length > 0) {
       this.endContainer()
     }
@@ -436,7 +511,22 @@ export class StreamJSON {
       if (f.type === 0) {
         if (f.key !== null) path.push(f.key)
       } else {
+        // after assignValue, index is already incremented, so use index-1
         path.push(f.index > 0 ? f.index - 1 : f.index)
+      }
+    }
+    return path
+  }
+
+  private partialPath(): Path {
+    const path: Path = []
+    for (let i = 0; i < this.stack.length; i++) {
+      const f = this.stack[i]
+      if (f.type === 0) {
+        if (f.key !== null) path.push(f.key)
+      } else {
+        // during partial updates, index has NOT been incremented yet
+        path.push(f.index)
       }
     }
     return path

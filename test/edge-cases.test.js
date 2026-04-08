@@ -2,48 +2,52 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { StreamJSON } from '../packages/core/dist/index.js'
 
+function obj(o) {
+  return Object.assign(Object.create(null), o)
+}
+
 describe('edge cases', () => {
   describe('LLM error recovery', () => {
     it('handles truncated string', () => {
       const p = new StreamJSON()
       p.push('{"name": "Joh')
       p.end()
-      assert.deepEqual(p.get(), { name: 'Joh' })
+      assert.deepEqual(p.get(), obj({ name: 'Joh' }))
     })
 
     it('handles truncated number', () => {
       const p = new StreamJSON()
       p.push('{"val": 123')
       p.end()
-      assert.deepEqual(p.get(), { val: 123 })
+      assert.deepEqual(p.get(), obj({ val: 123 }))
     })
 
     it('handles truncated keyword true', () => {
       const p = new StreamJSON()
       p.push('{"ok": tru')
       p.end()
-      assert.deepEqual(p.get(), { ok: true })
+      assert.deepEqual(p.get(), obj({ ok: true }))
     })
 
     it('handles truncated keyword false', () => {
       const p = new StreamJSON()
       p.push('{"ok": fal')
       p.end()
-      assert.deepEqual(p.get(), { ok: false })
+      assert.deepEqual(p.get(), obj({ ok: false }))
     })
 
     it('handles truncated keyword null', () => {
       const p = new StreamJSON()
       p.push('{"val": nul')
       p.end()
-      assert.deepEqual(p.get(), { val: null })
+      assert.deepEqual(p.get(), obj({ val: null }))
     })
 
     it('handles unclosed object', () => {
       const p = new StreamJSON()
       p.push('{"a": 1, "b": 2')
       p.end()
-      assert.deepEqual(p.get(), { a: 1, b: 2 })
+      assert.deepEqual(p.get(), obj({ a: 1, b: 2 }))
     })
 
     it('handles unclosed array', () => {
@@ -57,11 +61,11 @@ describe('edge cases', () => {
       const p = new StreamJSON()
       p.push('{"a": [1, {"b": 2')
       p.end()
-      assert.deepEqual(p.get(), { a: [1, { b: 2 }] })
+      assert.deepEqual(p.get(), obj({ a: [1, obj({ b: 2 })] }))
     })
 
     it('handles trailing comma in object', () => {
-      assert.deepEqual(StreamJSON.parse('{"a": 1,}'), { a: 1 })
+      assert.deepEqual(StreamJSON.parse('{"a": 1,}'), obj({ a: 1 }))
     })
 
     it('handles trailing comma in array', () => {
@@ -69,14 +73,23 @@ describe('edge cases', () => {
     })
 
     it('handles missing comma between object keys', () => {
-      assert.deepEqual(StreamJSON.parse('{"a": 1 "b": 2}'), { a: 1, b: 2 })
+      assert.deepEqual(StreamJSON.parse('{"a": 1 "b": 2}'), obj({ a: 1, b: 2 }))
     })
 
     it('ignores content after root JSON completes', () => {
       const p = new StreamJSON()
       p.push('{"a": 1} some extra text')
       p.end()
-      assert.deepEqual(p.get(), { a: 1 })
+      assert.deepEqual(p.get(), obj({ a: 1 }))
+    })
+
+    it('handles } in EXPECT_VALUE (empty value recovery)', () => {
+      assert.deepEqual(StreamJSON.parse('{"a": }'), obj({}))
+    })
+
+    it('second root in same chunk does not overwrite first', () => {
+      const result = StreamJSON.parse('{"a": 1}{"b": 2}')
+      assert.deepEqual(result, obj({ a: 1 }))
     })
   })
 
@@ -126,7 +139,7 @@ describe('edge cases', () => {
       p.push('{"key"')
       p.push(': "val"}')
       p.end()
-      assert.deepEqual(p.get(), { key: 'val' })
+      assert.deepEqual(p.get(), obj({ key: 'val' }))
     })
 
     it('opening brace at chunk boundary', () => {
@@ -134,7 +147,7 @@ describe('edge cases', () => {
       p.push('{"a": ')
       p.push('{"b": 1}}')
       p.end()
-      assert.deepEqual(p.get(), { a: { b: 1 } })
+      assert.deepEqual(p.get(), obj({ a: obj({ b: 1 }) }))
     })
   })
 
@@ -156,7 +169,7 @@ describe('edge cases', () => {
     })
 
     it('handles nested empty containers', () => {
-      assert.deepEqual(StreamJSON.parse('[{}, [], {"a": []}]'), [{}, [], { a: [] }])
+      assert.deepEqual(StreamJSON.parse('[{}, [], {"a": []}]'), [obj({}), [], obj({ a: [] })])
     })
 
     it('handles string with all escape types', () => {
@@ -187,18 +200,37 @@ describe('edge cases', () => {
       const partial = p.get()
       assert.equal(partial.msg, 'hel')
     })
+
+    it('partial array event paths are correct', () => {
+      const events = []
+      const p = new StreamJSON({ emitPartial: true })
+      p.on('value', (path, value, isComplete) => {
+        if (!isComplete) events.push({ path: [...path], value })
+      })
+      p.push('["ab')
+      p.push('c", "de')
+      p.push('fg"]')
+      p.end()
+      // first partial events should be at index 0
+      const firstPartials = events.filter(e => e.path[0] === 0)
+      assert.ok(firstPartials.length > 0)
+      // second element partials should be at index 1
+      const secondPartials = events.filter(e => e.path[0] === 1)
+      assert.ok(secondPartials.length > 0)
+    })
   })
 
   describe('streaming simulation (random chunks)', () => {
     it('parses complex JSON with random chunk sizes', () => {
-      const json = JSON.stringify({
+      const original = {
         users: [
           { id: 1, name: 'Alice', tags: ['admin', 'user'], active: true },
           { id: 2, name: 'Bob', tags: ['user'], active: false },
         ],
         total: 2,
         page: null,
-      })
+      }
+      const json = JSON.stringify(original)
 
       for (let trial = 0; trial < 20; trial++) {
         const p = new StreamJSON()
@@ -209,7 +241,8 @@ describe('edge cases', () => {
           i += chunkSize
         }
         p.end()
-        assert.deepEqual(p.get(), JSON.parse(json))
+        // compare stringified since Object.create(null) vs {} would fail deepEqual
+        assert.equal(JSON.stringify(p.get()), json)
       }
     })
   })
@@ -223,14 +256,221 @@ describe('edge cases', () => {
         'false',
         'null',
         '[]',
-        '{}',
         '[1,2,3]',
-        '{"a":1}',
         '{"a":{"b":[1,2,{"c":true}]}}',
       ]
       for (const c of cases) {
-        assert.deepEqual(StreamJSON.parse(c), JSON.parse(c), `Failed for: ${c}`)
+        assert.equal(JSON.stringify(StreamJSON.parse(c)), JSON.stringify(JSON.parse(c)), `Failed for: ${c}`)
       }
+    })
+
+    it('empty object matches', () => {
+      const result = StreamJSON.parse('{}')
+      assert.equal(JSON.stringify(result), '{}')
+    })
+
+    it('simple object matches', () => {
+      const result = StreamJSON.parse('{"a":1}')
+      assert.equal(JSON.stringify(result), '{"a":1}')
+    })
+  })
+
+  describe('security', () => {
+    it('objects use null prototype — immune to prototype pollution', () => {
+      const result = StreamJSON.parse('{"__proto__": {"polluted": true}}')
+      const plain = {}
+      assert.equal(plain.polluted, undefined)
+      assert.equal(Object.getPrototypeOf(result), null)
+    })
+
+    it('constructor key does not pollute', () => {
+      const result = StreamJSON.parse('{"constructor": {"prototype": {"x": 1}}}')
+      assert.equal(({}).x, undefined)
+    })
+  })
+
+  describe('unicode and surrogates', () => {
+    it('lone high surrogate followed by literal char is preserved', () => {
+      const p = new StreamJSON()
+      p.push('"\\uD83D!')
+      p.push('"')
+      p.end()
+      const val = p.get()
+      assert.ok(val.includes('!'))
+      assert.equal(val.length, 2) // surrogate char + '!'
+    })
+
+    it('invalid hex in unicode escape emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('"\\uGGGG"')
+      p.end()
+      assert.ok(errors.length > 0)
+    })
+  })
+
+  describe('number validation', () => {
+    it('emits error for NaN-producing numbers and does NOT assign NaN', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('{"x": -}')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid number')))
+      // NaN should NOT be in the output
+      const result = p.get()
+      assert.ok(!('x' in result) || result.x !== result.x === false, 'x should not be NaN')
+    })
+
+    it('1e produces error and no NaN in output', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('[1e]')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid number')))
+    })
+
+    it('1e999 produces error (Infinity)', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('1e999')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Invalid number')))
+    })
+
+    it('+/- only valid in exponent context', () => {
+      assert.equal(StreamJSON.parse('1e+10'), 1e+10)
+      assert.equal(StreamJSON.parse('1E-5'), 1E-5)
+    })
+
+    it('leading zero emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('[01]')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Leading zero')))
+    })
+
+    it('trailing dot emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('0.')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Trailing dot')))
+    })
+
+    it('0.5 still works', () => {
+      assert.equal(StreamJSON.parse('0.5'), 0.5)
+    })
+
+    it('-0 still works', () => {
+      assert.equal(StreamJSON.parse('-0'), -0)
+    })
+
+    it('00 triggers leading zero error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('00')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Leading zero')))
+    })
+  })
+
+  describe('bare structural chars', () => {
+    it('bare } emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('}')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Unexpected }')))
+    })
+
+    it('bare ] emits error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push(']')
+      p.end()
+      assert.ok(errors.some(e => e.includes('Unexpected ]')))
+    })
+  })
+
+  describe('truncated key recovery', () => {
+    it('truncated key gets null value', () => {
+      const p = new StreamJSON()
+      p.push('{"name"')
+      p.end()
+      assert.deepEqual(p.get(), obj({ name: null }))
+    })
+
+    it('truncated key mid-string gets null value', () => {
+      const p = new StreamJSON()
+      p.push('{"na')
+      p.end()
+      assert.deepEqual(p.get(), obj({ na: null }))
+    })
+
+    it('truncated after colon gets null value', () => {
+      const p = new StreamJSON()
+      p.push('{"key":')
+      p.end()
+      assert.deepEqual(p.get(), obj({ key: null }))
+    })
+
+    it('truncated after colon with existing key', () => {
+      const p = new StreamJSON()
+      p.push('{"a": 1, "b":')
+      p.end()
+      assert.deepEqual(p.get(), obj({ a: 1, b: null }))
+    })
+  })
+
+  describe('NaN number recovery in objects', () => {
+    it('NaN number in object assigns null for key', () => {
+      const p = new StreamJSON()
+      p.push('{"a": 1e}')
+      p.end()
+      assert.deepEqual(p.get(), obj({ a: null }))
+    })
+
+    it('Infinity number in object assigns null for key', () => {
+      const p = new StreamJSON()
+      p.push('{"x": 1e999}')
+      p.end()
+      assert.equal(p.get().x, null)
+    })
+  })
+
+  describe('zero with exponent', () => {
+    it('0e5 is valid — no error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('0e5')
+      p.end()
+      assert.equal(errors.length, 0)
+      assert.equal(p.get(), 0)
+    })
+
+    it('0E-3 is valid — no error', () => {
+      const errors = []
+      const p = new StreamJSON()
+      p.on('error', (err) => errors.push(err.message))
+      p.push('{"x": 0E-3}')
+      p.end()
+      assert.equal(errors.length, 0)
+      assert.equal(p.get().x, 0)
+    })
+
+    it('0.0e1 is valid', () => {
+      assert.equal(StreamJSON.parse('0.0e1'), 0)
     })
   })
 })

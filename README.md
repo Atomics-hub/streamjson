@@ -131,9 +131,9 @@ function Chat() {
 ```jsx
 import { StreamJSON } from '@a5omic/streamjson-react'
 
-function ToolCall({ streamingJSON }) {
+function ToolCall({ streamingJSON, done }) {
   return (
-    <StreamJSON content={streamingJSON}>
+    <StreamJSON content={streamingJSON} complete={done}>
       {(value, isComplete) =>
         value ? <ToolCard tool={value} loading={!isComplete} /> : <Skeleton />
       }
@@ -179,6 +179,12 @@ StreamJSON handles the specific ways LLMs produce malformed JSON:
 ### `StreamJSON.parse(json: string): unknown`
 
 Static convenience. Like `JSON.parse` but tolerant of truncated/malformed input.
+
+## Security
+
+- **Prototype pollution immune**: All parsed objects use `Object.create(null)` — no `__proto__`, `constructor`, or `prototype` chain attacks.
+- **No regex in hot path**: Zero ReDoS risk.
+- **Invalid unicode/escape handling**: Emits error events instead of silently producing corrupt values.
 
 ## How it works
 

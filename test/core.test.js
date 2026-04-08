@@ -2,6 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { StreamJSON } from '../packages/core/dist/index.js'
 
+function obj(o) {
+  return Object.assign(Object.create(null), o)
+}
+
 describe('StreamJSON', () => {
   describe('basic types', () => {
     it('parses a string', () => {
@@ -41,25 +45,30 @@ describe('StreamJSON', () => {
 
   describe('objects', () => {
     it('parses empty object', () => {
-      assert.deepEqual(StreamJSON.parse('{}'), {})
+      assert.deepEqual(StreamJSON.parse('{}'), obj({}))
     })
 
     it('parses simple object', () => {
-      assert.deepEqual(StreamJSON.parse('{"a": 1, "b": 2}'), { a: 1, b: 2 })
+      assert.deepEqual(StreamJSON.parse('{"a": 1, "b": 2}'), obj({ a: 1, b: 2 }))
     })
 
     it('parses nested objects', () => {
       assert.deepEqual(
         StreamJSON.parse('{"a": {"b": {"c": 1}}}'),
-        { a: { b: { c: 1 } } }
+        obj({ a: obj({ b: obj({ c: 1 }) }) })
       )
     })
 
     it('parses object with mixed types', () => {
       assert.deepEqual(
         StreamJSON.parse('{"s": "hello", "n": 42, "b": true, "x": null}'),
-        { s: 'hello', n: 42, b: true, x: null }
+        obj({ s: 'hello', n: 42, b: true, x: null })
       )
+    })
+
+    it('objects use null prototype (no prototype pollution)', () => {
+      const result = StreamJSON.parse('{}')
+      assert.equal(Object.getPrototypeOf(result), null)
     })
   })
 
@@ -75,7 +84,7 @@ describe('StreamJSON', () => {
     it('parses mixed array', () => {
       assert.deepEqual(
         StreamJSON.parse('[1, "two", true, null, {}]'),
-        [1, 'two', true, null, {}]
+        [1, 'two', true, null, obj({})]
       )
     })
 
@@ -117,7 +126,7 @@ describe('StreamJSON', () => {
       p.push('me": "Jo')
       p.push('hn", "age": 30}')
       p.end()
-      assert.deepEqual(p.get(), { name: 'John', age: 30 })
+      assert.deepEqual(p.get(), obj({ name: 'John', age: 30 }))
     })
 
     it('splits string across chunks', () => {
@@ -151,16 +160,16 @@ describe('StreamJSON', () => {
       const p = new StreamJSON()
       for (const ch of json) p.push(ch)
       p.end()
-      assert.deepEqual(p.get(), { a: [1, 2] })
+      assert.deepEqual(p.get(), obj({ a: [1, 2] }))
     })
 
     it('partial string visible mid-stream', () => {
       const p = new StreamJSON({ emitPartial: true })
       p.push('{"name": "Jo')
-      assert.deepEqual(p.get(), { name: 'Jo' })
+      assert.deepEqual(p.get(), obj({ name: 'Jo' }))
       p.push('hn"}')
       p.end()
-      assert.deepEqual(p.get(), { name: 'John' })
+      assert.deepEqual(p.get(), obj({ name: 'John' }))
     })
 
     it('partial array visible mid-stream', () => {
@@ -221,7 +230,7 @@ describe('StreamJSON', () => {
       const p = new StreamJSON()
       p.push('{"a": 1}')
       p.end()
-      assert.deepEqual(p.get(), { a: 1 })
+      assert.deepEqual(p.get(), obj({ a: 1 }))
 
       p.reset()
       p.push('[1, 2, 3]')
@@ -234,14 +243,14 @@ describe('StreamJSON', () => {
     it('handles extra whitespace', () => {
       assert.deepEqual(
         StreamJSON.parse('  {  "a"  :  1  ,  "b"  :  2  }  '),
-        { a: 1, b: 2 }
+        obj({ a: 1, b: 2 })
       )
     })
 
     it('handles newlines and tabs', () => {
       assert.deepEqual(
         StreamJSON.parse('{\n\t"a": 1,\n\t"b": 2\n}'),
-        { a: 1, b: 2 }
+        obj({ a: 1, b: 2 })
       )
     })
   })
@@ -249,14 +258,14 @@ describe('StreamJSON', () => {
   describe('complex structures', () => {
     it('parses deeply nested structure', () => {
       const json = '{"a": {"b": {"c": {"d": {"e": 42}}}}}'
-      assert.deepEqual(StreamJSON.parse(json), { a: { b: { c: { d: { e: 42 } } } } })
+      assert.deepEqual(StreamJSON.parse(json), obj({ a: obj({ b: obj({ c: obj({ d: obj({ e: 42 }) }) }) }) }))
     })
 
     it('parses array of objects', () => {
       const json = '[{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]'
       assert.deepEqual(StreamJSON.parse(json), [
-        { id: 1, name: 'Alice' },
-        { id: 2, name: 'Bob' },
+        obj({ id: 1, name: 'Alice' }),
+        obj({ id: 2, name: 'Bob' }),
       ])
     })
 

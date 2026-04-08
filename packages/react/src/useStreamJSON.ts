@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react'
+import { useRef, useCallback, useState, useEffect } from 'react'
 import { StreamJSON, type StreamJSONOptions } from '@a5omic/streamjson'
 
 export interface UseStreamJSONOptions extends StreamJSONOptions {}
@@ -11,6 +11,12 @@ export function useStreamJSON<T = unknown>(options: UseStreamJSONOptions = {}) {
   if (!parserRef.current) {
     parserRef.current = new StreamJSON(options)
   }
+
+  useEffect(() => {
+    return () => {
+      parserRef.current?.reset()
+    }
+  }, [])
 
   const push = useCallback((chunk: string) => {
     parserRef.current?.push(chunk)
