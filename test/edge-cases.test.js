@@ -311,16 +311,35 @@ describe('edge cases', () => {
   })
 
   describe('number validation', () => {
-    it('emits error for NaN-producing numbers and does NOT assign NaN', () => {
+    it('emits error for NaN-producing numbers and assigns null', () => {
       const errors = []
       const p = new StreamJSON()
       p.on('error', (err) => errors.push(err.message))
       p.push('{"x": -}')
       p.end()
       assert.ok(errors.some(e => e.includes('Invalid number')))
-      // NaN should NOT be in the output
-      const result = p.get()
-      assert.ok(!('x' in result) || result.x !== result.x === false, 'x should not be NaN')
+      assert.equal(p.get().x, null)
+    })
+
+    it('root-level NaN returns null not undefined', () => {
+      const p = new StreamJSON()
+      p.push('1e')
+      p.end()
+      assert.equal(p.get(), null)
+    })
+
+    it('root-level Infinity returns null not undefined', () => {
+      const p = new StreamJSON()
+      p.push('1e999')
+      p.end()
+      assert.equal(p.get(), null)
+    })
+
+    it('root-level bare minus returns null', () => {
+      const p = new StreamJSON()
+      p.push('-')
+      p.end()
+      assert.equal(p.get(), null)
     })
 
     it('1e produces error and no NaN in output', () => {

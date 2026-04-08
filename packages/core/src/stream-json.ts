@@ -395,12 +395,14 @@ export class StreamJSON {
     const val = Number(buf)
     if (Number.isNaN(val) || !Number.isFinite(val)) {
       this.emitError(`Invalid number: ${buf}`)
-      // assign null to preserve position — prevents key drops (objects) and index shifts (arrays)
+      // assign null to preserve position — prevents key drops (objects), index shifts (arrays), and undefined root
       if (this.stack.length > 0) {
         const top = this.stack[this.stack.length - 1]
         if ((top.type === 0 && top.key !== null) || top.type === 1) {
           this.assignValue(null)
         }
+      } else {
+        this.assignValue(null)
       }
       this.afterValue()
       return
