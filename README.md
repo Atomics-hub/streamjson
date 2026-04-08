@@ -1,6 +1,10 @@
 # StreamJSON
 
-O(1) streaming JSON parser for the AI era. Zero dependencies. ~3KB gzipped.
+[![npm version](https://img.shields.io/npm/v/@a5omic/streamjson.svg)](https://www.npmjs.com/package/@a5omic/streamjson)
+[![license](https://img.shields.io/npm/l/@a5omic/streamjson.svg)](https://github.com/Atomics-hub/streamjson/blob/main/LICENSE)
+[![bundle size](https://img.shields.io/bundlephobia/minzip/@a5omic/streamjson)](https://bundlephobia.com/package/@a5omic/streamjson)
+
+O(1) streaming JSON parser for the AI era. Zero dependencies. ~4KB gzipped.
 
 Every other "streaming JSON" library re-parses the entire accumulated string on every chunk — O(n²) total. StreamJSON processes each byte exactly once and maintains a live object tree. `parser.get()` returns the current state in O(1).
 

@@ -8,7 +8,8 @@
   "scripts": {
     "build": "npm run build --workspaces",
     "test": "node --test test/**/*.test.js",
-    "bench": "node test/bench/streaming-benchmark.js"
+    "bench": "node test/bench/streaming-benchmark.js",
+    "demo": "npx serve demo"
   },
   "devDependencies": {
     "partial-json": "^0.1.7",

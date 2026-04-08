@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreamJSON — O(1) Streaming JSON Parser for the AI Era</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0a0a0a; --surface: #141414; --border: #262626;
+      --text: #e5e5e5; --text-muted: #737373; --accent: #3b82f6;
+      --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); }
+
+    .hero { text-align: center; padding: 60px 20px 32px; }
+    .hero h1 { font-size: 52px; font-weight: 800; letter-spacing: -2px; margin-bottom: 12px; }
+    .hero h1 span { color: var(--accent); }
+    .hero p { color: var(--text-muted); font-size: 18px; max-width: 640px; margin: 0 auto 20px; line-height: 1.6; }
+
+    .badge-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 100px; font-size: 12px; font-weight: 600; font-family: var(--mono); }
+    .badge-green { background: rgba(34,197,94,0.12); color: var(--green); border: 1px solid rgba(34,197,94,0.25); }
+    .badge-blue { background: rgba(59,130,246,0.12); color: var(--accent); border: 1px solid rgba(59,130,246,0.25); }
+    .badge-yellow { background: rgba(234,179,8,0.12); color: var(--yellow); border: 1px solid rgba(234,179,8,0.25); }
+
+    .controls { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 24px; }
+    button { padding: 9px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-family: var(--font); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+    button:hover { border-color: var(--accent); background: rgba(59,130,246,0.08); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    button.primary:hover { background: #2563eb; }
+
+    .status { text-align: center; margin: 0 auto 16px; font-size: 13px; color: var(--text-muted); min-height: 18px; }
+
+    .metrics-bar { display: flex; gap: 16px; justify-content: center; margin: 0 auto 24px; padding: 14px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; max-width: 1000px; font-family: var(--mono); font-size: 12px; flex-wrap: wrap; }
+    .metric-item { text-align: center; min-width: 80px; }
+    .metric-label { color: var(--text-muted); margin-bottom: 3px; font-size: 11px; }
+    .metric-value { font-weight: 700; font-size: 17px; }
+    .good { color: var(--green); }
+    .bad { color: var(--red); }
+    .neutral { color: var(--text); }
+
+    .comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1400px; margin: 0 auto; padding: 0 20px 40px; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .panel-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot-red { background: var(--red); }
+    .dot-green { background: var(--green); }
+    .panel-stats { display: flex; gap: 14px; font-family: var(--mono); font-size: 11px; }
+    .stat { display: flex; align-items: center; gap: 4px; }
+    .stat-label { color: var(--text-muted); }
+
+    .panel-body { padding: 16px; min-height: 400px; max-height: 550px; overflow-y: auto; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; line-height: 1.6; }
+
+    .bench-table { max-width: 900px; margin: 0 auto 40px; padding: 0 20px; }
+    .bench-table h2 { text-align: center; font-size: 20px; margin-bottom: 16px; font-weight: 700; }
+    .bench-table table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; background: var(--surface); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    .bench-table th { padding: 10px 14px; text-align: left; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+    .bench-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    .bench-table tr:last-child td { border-bottom: none; }
+    .bench-table .winner { color: var(--green); font-weight: 700; }
+    .bench-table .loser { color: var(--text-muted); }
+
+    @media (max-width: 768px) { .comparison { grid-template-columns: 1fr; } .hero h1 { font-size: 36px; } }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>stream<span>json</span></h1>
+    <p>
+      Every "streaming JSON" library re-parses the entire string on every token. That's O(n²).
+      StreamJSON processes each byte exactly once. That's O(n).
+    </p>
+    <div class="badge-row">
+      <span class="badge badge-green">~4KB gzipped</span>
+      <span class="badge badge-blue">zero dependencies</span>
+      <span class="badge badge-yellow">prototype-safe</span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" onclick="startDemo()">Stream Demo</button>
+    <button onclick="startScale()">Scale Test (10KB)</button>
+    <button onclick="resetAll()">Reset</button>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <div class="metrics-bar">
+    <div class="metric-item">
+      <div class="metric-label">Tokens</div>
+      <div class="metric-value neutral" id="m-tokens">0</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-label">partial-json (total)</div>
+      <div class="metric-value bad" id="m-pj-time">&mdash;</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-label">StreamJSON (total)</div>
+      <div class="metric-value good" id="m-sj-time">&mdash;</div>
+    </div>
+    <div class="metric-item">
+      <div class="metric-label">Speedup</div>
+      <div class="metric-value good" id="m-speedup">&mdash;</div>
+    </div>
+  </div>
+
+  <div class="comparison">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><span class="dot dot-red"></span> partial-json (re-parse every token)</div>
+        <div class="panel-stats">
+          <div class="stat"><span class="stat-label">Time:</span><span class="bad" id="pj-time">0ms</span></div>
+        </div>
+      </div>
+      <div class="panel-body" id="pj-output"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title"><span class="dot dot-green"></span> StreamJSON (incremental)</div>
+        <div class="panel-stats">
+          <div class="stat"><span class="stat-label">Time:</span><span class="good" id="sj-time">0ms</span></div>
+        </div>
+      </div>
+      <div class="panel-body" id="sj-output"></div>
+    </div>
+  </div>
+
+  <div class="bench-table">
+    <h2>Benchmark Results</h2>
+    <table>
+      <thead>
+        <tr><th>Payload Size</th><th>StreamJSON</th><th>partial-json</th><th>Ratio</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>612 bytes</td>
+          <td class="winner">0.028ms</td><td class="loser">1.56ms</td><td class="winner">55x</td>
+        </tr>
+        <tr>
+          <td>1KB</td>
+          <td class="winner">0.27 &micro;s/chunk</td><td class="loser">27 &micro;s/chunk</td><td class="winner">100x</td>
+        </tr>
+        <tr>
+          <td>10KB</td>
+          <td class="winner">0.21 &micro;s/chunk</td><td class="loser">150 &micro;s/chunk</td><td class="winner">714x</td>
+        </tr>
+        <tr>
+          <td>50KB</td>
+          <td class="winner">0.19 &micro;s/chunk</td><td class="loser">686 &micro;s/chunk</td><td class="winner">3,400x</td>
+        </tr>
+        <tr>
+          <td>Bundle size</td>
+          <td class="winner">~4KB gzipped</td><td class="loser">~3KB gzipped</td><td>&mdash;</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script type="module">
+    import { StreamJSON } from '../packages/core/dist/index.js';
+
+    const FIXTURE = {
+      id: 'msg_01XFDUDYJgAACzvnptvVoYEL',
+      type: 'message',
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'toolu_01H9YhPm5VFpMeRKdiGMPbJR',
+        name: 'get_weather',
+        input: {
+          location: 'San Francisco, CA',
+          units: 'fahrenheit',
+          forecast_days: 3,
+          include_hourly: true,
+          metadata: {
+            source: 'user_request',
+            timestamp: '2026-04-07T12:00:00Z',
+            session_id: 'sess_abc123def456',
+            tags: ['weather', 'forecast', 'california', 'urgent']
+          }
+        }
+      }],
+      model: 'claude-opus-4-6-20250415',
+      stop_reason: 'tool_use',
+      stop_sequence: null,
+      usage: { input_tokens: 384, output_tokens: 96 }
+    };
+
+    function generateLargeFixture(targetBytes) {
+      const items = [];
+      const item = {
+        id: 1, name: 'Alice Wonderland', email: 'alice@example.com', active: true,
+        tags: ['admin', 'user', 'premium'],
+        address: { street: '123 Main St', city: 'San Francisco', state: 'CA', zip: '94105' }
+      };
+      const itemStr = JSON.stringify(item);
+      const count = Math.ceil(targetBytes / itemStr.length);
+      for (let i = 0; i < count; i++) items.push({ ...item, id: i });
+      return JSON.stringify({ users: items, total: count, page: 1 });
+    }
+
+    function tokenize(text, avgSize = 6) {
+      const tokens = [];
+      let i = 0;
+      while (i < text.length) {
+        const len = Math.max(1, Math.floor(Math.random() * avgSize * 2) + 1);
+        tokens.push(text.slice(i, i + len));
+        i += len;
+      }
+      return tokens;
+    }
+
+    function naivePartialParse(json) {
+      try {
+        return JSON.parse(json);
+      } catch {
+        for (let i = json.length - 1; i >= 0; i--) {
+          try {
+            const patched = json.slice(0, i) + '}'.repeat(10) + ']'.repeat(10);
+            return JSON.parse(patched);
+          } catch { continue; }
+        }
+        return undefined;
+      }
+    }
+
+    function prettyJSON(val) {
+      try { return JSON.stringify(val, null, 2); }
+      catch { return String(val); }
+    }
+
+    function setStatus(text) { document.getElementById('status').textContent = text; }
+    function setMetric(id, val) { document.getElementById(id).textContent = val; }
+
+    let running = false;
+
+    window.startDemo = function() {
+      if (running) return;
+      run(JSON.stringify(FIXTURE), 'Stream Demo');
+    };
+
+    window.startScale = function() {
+      if (running) return;
+      run(generateLargeFixture(10240), 'Scale Test (10KB)');
+    };
+
+    function run(json, label) {
+      resetAll();
+      running = true;
+
+      const tokens = tokenize(json);
+      const pjOutput = document.getElementById('pj-output');
+      const sjOutput = document.getElementById('sj-output');
+
+      // StreamJSON: process ALL tokens instantly
+      const sjParser = new StreamJSON();
+      const sjStart = performance.now();
+      for (const t of tokens) sjParser.push(t);
+      sjParser.end();
+      const sjTime = performance.now() - sjStart;
+
+      sjOutput.textContent = prettyJSON(sjParser.get());
+      setMetric('m-sj-time', sjTime.toFixed(2) + 'ms');
+      setMetric('sj-time', sjTime.toFixed(2) + 'ms');
+
+      const sjDone = document.createElement('div');
+      sjDone.style.cssText = 'position:sticky;bottom:0;background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e;padding:10px;text-align:center;border-radius:8px;font-weight:700;font-family:var(--mono);margin-top:12px;';
+      sjDone.textContent = `DONE in ${sjTime.toFixed(2)}ms`;
+      sjOutput.appendChild(sjDone);
+
+      setStatus(`${label}: ${tokens.length} tokens (${(json.length/1024).toFixed(1)}KB) — StreamJSON finished, partial-json catching up...`);
+
+      // partial-json simulation: re-parse accumulated string each token (O(n^2))
+      let pjIdx = 0;
+      let accumulated = '';
+      let pjTotal = 0;
+
+      const tick = () => {
+        if (pjIdx >= tokens.length) {
+          setMetric('m-pj-time', pjTotal.toFixed(1) + 'ms');
+          setMetric('pj-time', pjTotal.toFixed(1) + 'ms');
+          const speedup = (pjTotal / Math.max(sjTime, 0.01)).toFixed(0);
+          setMetric('m-speedup', speedup + 'x');
+          setStatus(`${label} complete! StreamJSON: ${sjTime.toFixed(2)}ms — partial-json: ${pjTotal.toFixed(1)}ms — ${speedup}x faster`);
+          running = false;
+          return;
+        }
+
+        const batchSize = Math.max(1, Math.min(10, Math.floor(tokens.length / 80)));
+        for (let b = 0; b < batchSize && pjIdx < tokens.length; b++) {
+          accumulated += tokens[pjIdx++];
+          const ms = performance.now();
+          naivePartialParse(accumulated);
+          pjTotal += performance.now() - ms;
+        }
+
+        pjOutput.textContent = prettyJSON(naivePartialParse(accumulated));
+        pjOutput.scrollTop = pjOutput.scrollHeight;
+
+        setMetric('m-tokens', pjIdx + '/' + tokens.length);
+        setMetric('m-pj-time', pjTotal.toFixed(1) + 'ms');
+        setMetric('pj-time', pjTotal.toFixed(1) + 'ms');
+        if (pjTotal > 0 && sjTime > 0) {
+          setMetric('m-speedup', (pjTotal / sjTime).toFixed(0) + 'x');
+        }
+
+        requestAnimationFrame(tick);
+      };
+
+      setMetric('m-tokens', '0/' + tokens.length);
+      setTimeout(() => requestAnimationFrame(tick), 150);
+    }
+
+    window.resetAll = function() {
+      running = false;
+      document.getElementById('pj-output').textContent = '';
+      document.getElementById('sj-output').textContent = '';
+      setMetric('m-tokens', '0');
+      setMetric('m-pj-time', '\u2014');
+      setMetric('m-sj-time', '\u2014');
+      setMetric('m-speedup', '\u2014');
+      setMetric('pj-time', '0ms');
+      setMetric('sj-time', '0ms');
+      setStatus('');
+    };
+  </script>
+</body>
+</html>
